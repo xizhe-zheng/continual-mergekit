@@ -1,11 +1,17 @@
 merge_method: task_arithmetic
-base_model: /root/autodl-fs/data/models/base
+base_model: base
 
 models:
-  - model: /root/autodl-fs/data/models/gigpo-alfworld
+  - model: toolrl
     parameters:
       weight: 1.0
-  - model: /root/autodl-fs/data/models/gigpo-webshop
+  - model: research
+    parameters:
+      weight: 1.0
+  - model: gigpo-webshop
+    parameters:
+      weight: 1.0
+  - model: gigpo-alfworld
     parameters:
       weight: 1.0
 
