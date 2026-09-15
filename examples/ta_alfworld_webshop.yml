@@ -1,0 +1,18 @@
+merge_method: task_arithmetic
+base_model: /root/autodl-fs/data/models/base
+
+models:
+  - model: /root/autodl-fs/data/models/gigpo-alfworld
+    parameters:
+      weight: 1.0
+  - model: /root/autodl-fs/data/models/gigpo-webshop
+    parameters:
+      weight: 1.0
+
+parameters:
+  normalize: false
+  lambda: 1.0
+
+dtype: bfloat16
+tokenizer:
+  source: base
