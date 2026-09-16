@@ -1,0 +1,16 @@
+merge_method: ram
+base_model: /root/autodl-fs/data/models/base
+
+models:
+  - model: /root/autodl-fs/data/models/toolrl
+  - model: /root/autodl-fs/data/models/research
+  - model: /root/autodl-fs/data/models/gigpo-webshop
+  - model: /root/autodl-fs/data/models/gigpo-alfworld
+
+parameters:
+  epsilon: 0.00001
+
+dtype: float32
+out_dtype: bfloat16
+tokenizer:
+  source: base
