@@ -44,6 +44,14 @@ def run_merge(
     loader_cache = LoaderCache()
     loader_cache.setup(options=options)
 
+    if merge_config.merge_method == "ramplus":
+        from mergekit.ramplus import prepare_ramplus
+
+        # Save the reusable recipe rather than internal precomputed scales.
+        if config_source is None:
+            config_source = merge_config.to_yaml()
+        merge_config = prepare_ramplus(merge_config, loader_cache, quiet=options.quiet)
+
     # create config for output model
     cfg_out = _model_out_config(
         merge_config, arch_info, trust_remote_code=options.trust_remote_code

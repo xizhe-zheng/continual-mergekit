@@ -1,0 +1,16 @@
+# Whole-model mrl arm-r-v2 statistics, unlike ramplus_tl.
+merge_method: ramplus
+base_model: base
+
+models:
+  - model: toolrl
+  - model: research
+  - model: gigpo-webshop
+  - model: gigpo-alfworld
+
+parameters:
+  epsilon: 0.00001
+  rescale_factor: 1.2
+
+dtype: float32
+out_dtype: bfloat16

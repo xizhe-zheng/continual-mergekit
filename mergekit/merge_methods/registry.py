@@ -16,9 +16,10 @@ from mergekit.merge_methods.multislerp import multislerp
 from mergekit.merge_methods.nearswap import nearswap_merge
 from mergekit.merge_methods.nuslerp import nuslerp_merge_method
 from mergekit.merge_methods.passthrough import passthrough_merge_method
-from mergekit.merge_methods.ram import ram_merge, ramplus_tl_merge
+from mergekit.merge_methods.ram import ram_merge, ramplus_merge, ramplus_tl_merge
 from mergekit.merge_methods.sce import sce_merge
 from mergekit.merge_methods.slerp import slerp_merge_method
+from mergekit.merge_methods.spectral import iso_c_merge, tsv_merge
 from mergekit.sparsify import SparsificationMethod
 
 _METHODS: Dict[str, MergeMethod] = {}
@@ -44,9 +45,12 @@ def registered_methods() -> Tuple[MergeMethod, ...]:
 
 
 for method in (
+    tsv_merge,
+    iso_c_merge,
     multislerp,
     nearswap_merge,
     ram_merge,
+    ramplus_merge,
     ramplus_tl_merge,
     sce_merge,
     linear_merge,

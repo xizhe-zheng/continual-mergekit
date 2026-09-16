@@ -12,6 +12,7 @@
   - [Karcher Mean (`karcher`)](#karcher-mean-karcher)
 - [Task Vector Methods](#task-vector-methods)
   - [Task Arithmetic (`task_arithmetic`)](#task-arithmetic-task_arithmetic)
+  - [TSV-Merge and Iso-C (`tsv`, `iso_c`)](#tsv-merge-and-iso-c-tsv-iso_c)
   - [TIES-Merging (`ties`)](#ties-merging-ties)
   - [DARE (`dare_linear`, `dare_ties`)](#dare-dare_linear-dare_ties)
   - [DELLA (`della`, `della_linear`)](#della-della-della_linear)
@@ -27,6 +28,9 @@
 - [Contributing](#contributing)
 
 ## Overview
+
+Global RAM+ is available as `ramplus`; see [configuration and scope](ramplus.md).
+It uses mrl's whole-model statistics, unlike the tensor-local `ramplus_tl`.
 
 This guide provides detailed information about the various model merging algorithms available in `mergekit`. Each method has specific use cases, parameters, and applications for combining machine learning models.
 
@@ -149,6 +153,57 @@ This guide provides detailed information about the various model merging algorit
 - `lambda` (global): Scaling factor applied to the summed task vectors before adding back to the base. Default `1.0`
 
 **Reference:** [Editing Models with Task Arithmetic](https://arxiv.org/abs/2212.04089)
+
+### TSV-Merge and Iso-C (`tsv`, `iso_c`)
+
+Both methods require a `base_model` and at least one non-base model. They merge
+layerwise task matrices (fine-tuned weights minus base weights), then return
+`base + lambda * merged_delta`. Inputs are equally weighted, following the
+official implementations; there are no `weight`, `density`, or `normalize`
+parameters. The shared `lambda` parameter defaults to `1.0` and corresponds to
+the authors' final task-vector scaling coefficient.
+
+- **TSV-Merge (`tsv`)** follows the official `TSVM` orthogonalization variant:
+  decompose each task matrix, retain `int(min(shape) * (1 / num_models))` leading
+  singular directions per model, place them in zero-padded concatenated factors,
+  orthogonalize the left and right factors using their SVD polar factors, and
+  reconstruct with the retained singular values. Padding is preserved when the
+  dimension is not divisible by the model count. If the retained rank is zero,
+  the update is zero and the base tensor is retained, as in the reference.
+- **Iso-C (`iso_c`)** sums the task matrices, computes an economy SVD, and replaces
+  every singular value with their arithmetic mean before reconstruction. There
+  is no rank truncation or small-singular-value threshold: zero singular values
+  also receive the mean when it is positive. This is Iso-C, not Iso-CTS.
+
+Both methods average task deltas for non-2D tensors and any tensor whose name
+contains `text_projection`, matching the official model-specific exception.
+Other 2D tensors, including LLM embeddings and output heads, take the matrix
+branch. This behavior should be considered when transferring the original
+vision-model recipes to language models.
+
+Computation promotes FP16/BF16 inputs to FP32 before subtraction and SVD;
+FP64 inputs retain FP64. Results are cast back to the aligned input dtype, with
+the usual optional `out_dtype` cast afterward. SVD is performed per tensor and
+can require substantial memory for large matrices. TSV uses one SVD per input
+matrix plus two for orthogonalization; Iso-C uses one per merged matrix.
+SVD directions in degenerate subspaces can depend on device/backend; finite
+gradients at repeated or zero singular values are not guaranteed.
+
+Examples: [tsv.yml](../examples/tsv.yml), [iso_c.yml](../examples/iso_c.yml).
+Only `lambda` needs tuning; the examples use local model paths to be replaced
+as needed. For example:
+
+```sh
+mergekit-yaml examples/tsv.yml ./merged-tsv --cuda
+mergekit-yaml examples/iso_c.yml ./merged-iso-c --cuda
+```
+
+References and implementations:
+
+- [Task Singular Vectors](https://arxiv.org/abs/2412.00081),
+  [official TSVM function](https://github.com/AntoAndGar/task_singular_vectors/blob/main/src/utils/TSVM_utils.py)
+- [No Task Left Behind](https://arxiv.org/abs/2502.04959),
+  [official Iso-C function](https://github.com/danielm1405/iso-merging/blob/main/src/utils/iso.py)
 
 ### TIES-Merging (`ties`)
 

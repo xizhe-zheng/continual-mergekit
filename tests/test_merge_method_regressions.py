@@ -183,7 +183,7 @@ def _check_strided_weights(method_name, *, base=True, **overrides):
     tensors = [torch.randn(4, 6, generator=generator).T for _ in range(count)]
     assert all(not tensor.is_contiguous() for tensor in tensors)
     copies = [tensor.clone() for tensor in tensors]
-    values = {"weight": 1.0, "t": 0.4, "density": 0.7}
+    values = {"weight": 1.0, "t": 0.4, "density": 0.7, "unique_scale": 1.2}
     parameters = {
         p.name: values[p.name] for p in method.spec.parameters if p.name in values
     }

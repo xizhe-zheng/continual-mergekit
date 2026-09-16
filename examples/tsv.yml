@@ -1,0 +1,10 @@
+merge_method: tsv
+base_model: base
+models:
+  - model: toolrl
+  - model: research
+  - model: gigpo-webshop
+  - model: gigpo-alfworld
+parameters:
+  lambda: 1.0
+dtype: bfloat16

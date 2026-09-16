@@ -29,6 +29,7 @@ from mergekit.merge_methods.generalized_task_arithmetic import (
 from mergekit.merge_methods.multislerp import multislerp as multislerp
 from mergekit.merge_methods.nearswap import nearswap_merge as nearswap_merge
 from mergekit.merge_methods.ram import ram_merge as ram_merge
+from mergekit.merge_methods.ram import ramplus_merge as ramplus_merge
 from mergekit.merge_methods.ram import ramplus_tl_merge as ramplus_tl_merge
 from mergekit.merge_methods.registry import get, register, registered_methods
 from mergekit.merge_methods.sce import sce_merge as sce_merge
@@ -58,6 +59,7 @@ __all__ = [
     "multislerp",
     "nearswap_merge",
     "ram_merge",
+    "ramplus_merge",
     "ramplus_tl_merge",
     "get",
     "register",

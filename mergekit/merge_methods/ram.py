@@ -5,10 +5,43 @@ from typing import List, Tuple
 
 import torch
 
-from mergekit.merge_methods.base import BasePolicy, InputContract, TensorGroup
+from mergekit.merge_methods.base import (
+    BasePolicy,
+    InputContract,
+    PerNonBase,
+    TensorGroup,
+)
 from mergekit.merge_methods.easy_define import merge_method
 
 BASE_CONTRACT = InputContract(base=BasePolicy.REQUIRED)
+
+
+@merge_method(
+    name="ramplus",
+    pretty_name="Reinforced Agent Merging Plus (Global)",
+    contract=InputContract(base=BasePolicy.REQUIRED, min_non_base=1),
+)
+def ramplus_merge(
+    group: TensorGroup,
+    unique_scale: PerNonBase[float],
+    epsilon: float = 1e-5,
+) -> torch.Tensor:
+    """Apply global mrl arm-r-v2 scales, computed by the checkpoint prepass.
+
+    Direct tensor callers must supply whole-model unique_scale values explicitly.
+    """
+    base = group.base.tensor
+    diffs, active, counts, overlap, unique = _prepare_ram_vectors(
+        [entry.tensor for entry in group.non_base], base, epsilon
+    )
+    scales = diffs.new_tensor(
+        [unique_scale[entry.id] for entry in group.non_base]
+    ).unsqueeze(-1)
+    delta = diffs * active
+    average = delta.sum(dim=0) / counts.squeeze(0).clamp(min=1)
+    weighted = (delta * scales).sum(dim=0)
+    merged = torch.where(unique.squeeze(0), weighted, average)
+    return base + merged.reshape_as(base)
 
 
 @merge_method(
