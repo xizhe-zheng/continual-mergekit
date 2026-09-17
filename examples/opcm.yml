@@ -1,11 +1,11 @@
 # Complete checkpoints sharing the same base, architecture and vocabulary.
 merge_method: opcm
-base_model: /root/autodl-fs/data/models/base
+base_model: base
 models:
-  - model: /root/autodl-fs/data/models/gigpo-webshop
-  - model: /root/autodl-fs/data/models/toolrl
-  - model: /root/autodl-fs/data/models/research
-  - model: /root/autodl-fs/data/models/gigpo-alfworld
+  - model: gigpo-webshop
+  - model: toolrl
+  - model: research
+  - model: gigpo-alfworld
 dtype: float32
 parameters:
   alpha: 0.5
