@@ -3,9 +3,9 @@
 merge_method: nufilt
 base_model: base
 models:
+  - model: gigpo-webshop
   - model: toolrl
   - model: research
-  - model: gigpo-webshop
   - model: gigpo-alfworld
 parameters:
   # Official default hyperparameters; not a validated optimum for these models.

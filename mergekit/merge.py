@@ -39,6 +39,11 @@ def run_merge(
     if not merge_config.models and not merge_config.slices and not merge_config.modules:
         raise RuntimeError("No output requested")
 
+    if merge_config.merge_method == "opcm":
+        from mergekit.opcm import run_opcm
+
+        return run_opcm(merge_config, out_path, options, config_source=config_source)
+
     arch_info = get_architecture_info(merge_config, options)
     # initialize loader cache and set options
     loader_cache = LoaderCache()

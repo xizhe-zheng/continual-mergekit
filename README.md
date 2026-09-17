@@ -333,6 +333,10 @@ Several examples of merge configurations are available in [`examples/`](examples
 
 ## Merge Methods
 
+OPCM is available through `mergekit-yaml` as a disk-backed sequential merge with
+per-step global normalization. See [OPCM](docs/opcm.md) for configuration,
+supported inputs, and memory requirements. It is not a tensor-only merge method.
+
 `mergekit` offers many methods for merging models, each with its own strengths and weaknesses. Choosing the right method depends on your specific goals, the relationship between the models you're merging, and the desired characteristics of the final model.
 
 For detailed explanations, parameter descriptions, and use cases for each method, please see our [**Merge Method Guide**](docs/merge_methods.md).
