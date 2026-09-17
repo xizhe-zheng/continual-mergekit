@@ -28,6 +28,7 @@ from mergekit.merge_methods.generalized_task_arithmetic import (
 )
 from mergekit.merge_methods.multislerp import multislerp as multislerp
 from mergekit.merge_methods.nearswap import nearswap_merge as nearswap_merge
+from mergekit.merge_methods.nufilt import nufilt_merge as nufilt_merge
 from mergekit.merge_methods.ram import ram_merge as ram_merge
 from mergekit.merge_methods.ram import ramplus_merge as ramplus_merge
 from mergekit.merge_methods.ram import ramplus_tl_merge as ramplus_tl_merge
@@ -59,6 +60,7 @@ __all__ = [
     "PerGroupValues",
     "multislerp",
     "nearswap_merge",
+    "nufilt_merge",
     "ram_merge",
     "ramplus_merge",
     "ramplus_tl_merge",

@@ -15,6 +15,7 @@ from mergekit.merge_methods.model_stock import model_stock_merge_method
 from mergekit.merge_methods.multislerp import multislerp
 from mergekit.merge_methods.nearswap import nearswap_merge
 from mergekit.merge_methods.nuslerp import nuslerp_merge_method
+from mergekit.merge_methods.nufilt import nufilt_merge
 from mergekit.merge_methods.passthrough import passthrough_merge_method
 from mergekit.merge_methods.ram import ram_merge, ramplus_merge, ramplus_tl_merge
 from mergekit.merge_methods.sce import sce_merge
@@ -58,6 +59,7 @@ for method in (
     linear_merge,
     slerp_merge_method,
     nuslerp_merge_method,
+    nufilt_merge,
     passthrough_merge_method,
     model_stock_merge_method,
     arcee_fusion_merge_method,

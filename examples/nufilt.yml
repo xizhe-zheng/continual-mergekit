@@ -1,0 +1,22 @@
+# Model references follow the other merge configurations in examples/.
+# Models are absorbed in this exact order (no implicit shuffle).
+merge_method: nufilt
+base_model: /root/autodl-fs/data/models/base
+models:
+  - model: /root/autodl-fs/data/models/toolrl
+  - model: /root/autodl-fs/data/models/research
+  - model: /root/autodl-fs/data/models/gigpo-webshop
+  - model: /root/autodl-fs/data/models/gigpo-alfworld
+parameters:
+  # Official default hyperparameters; not a validated optimum for these models.
+  # Official CLIP selection. For T5 use:
+  # "DenseReluDense,SelfAttention,EncDecAttention"
+  target_modules: "attn,fc1"
+  lora_r: 64
+  null_r: 128
+  grad_r: 8
+  null_space: true
+  lr: 0.001
+  max_steps: 50
+  seed: 42
+dtype: float32
