@@ -51,19 +51,33 @@ def _load_model(
 
 
 @torch.no_grad()
-def _write_weights(model, base, deltas, coefficients) -> None:
-    for name, parameter in model.named_parameters():
+def _write_weights(model, base, deltas, coefficients, task_names) -> None:
+    coefficient_values = coefficients.detach().cpu()
+    for parameter_index, (name, parameter) in enumerate(model.named_parameters()):
         merged = base[name].clone()
-        for task_name, task_deltas in deltas.items():
-            merged.add_(task_deltas[name], alpha=float(coefficients[task_name]))
+        for task_index, task_name in enumerate(task_names):
+            index = (
+                task_index
+                if coefficient_values.ndim == 1
+                else (
+                    parameter_index,
+                    task_index,
+                )
+            )
+            merged.add_(deltas[task_name][name], alpha=float(coefficient_values[index]))
         parameter.copy_(merged)
 
 
 @torch.no_grad()
-def _coefficient_gradients(model, deltas, task_names) -> torch.Tensor:
+def _coefficient_gradients(model, deltas, task_names, layer_wise=False) -> torch.Tensor:
     device = next(model.parameters()).device
-    result = torch.zeros(len(task_names), dtype=torch.float64, device=device)
-    for name, parameter in model.named_parameters():
+    shape = (
+        (sum(1 for _ in model.named_parameters()), len(task_names))
+        if layer_wise
+        else (len(task_names),)
+    )
+    result = torch.zeros(shape, dtype=torch.float64, device=device)
+    for parameter_index, (name, parameter) in enumerate(model.named_parameters()):
         if parameter.grad is None:
             continue
         gradient = parameter.grad.detach().float()
@@ -71,9 +85,72 @@ def _coefficient_gradients(model, deltas, task_names) -> torch.Tensor:
             value = (gradient * deltas[task_name][name].float()).sum(
                 dtype=torch.float64
             )
-            result[index] += value.to(device)
+            if layer_wise:
+                result[parameter_index, index] = value.to(device)
+            else:
+                result[index] += value.to(device)
         parameter.grad = None
     return result.float()
+
+
+@torch.no_grad()
+def _magnitude_threshold(task_deltas, density: float) -> float:
+    """Exact global top-density threshold at bfloat16 storage precision."""
+
+    histogram = torch.zeros(32768, dtype=torch.int64)
+    total = 0
+    chunk_size = 16 * 1024 * 1024
+    for tensor in task_deltas.values():
+        flat = tensor.detach().abs().to(torch.bfloat16).reshape(-1)
+        total += flat.numel()
+        for start in range(0, flat.numel(), chunk_size):
+            bits = flat[start : start + chunk_size].view(torch.int16).long()
+            histogram += torch.bincount(bits, minlength=32768).cpu()
+    keep = int(total * density)
+    rank = total - keep
+    threshold_bits = int(
+        torch.searchsorted(
+            histogram.cumsum(0), torch.tensor(max(rank, 1), dtype=torch.int64)
+        )
+    )
+    return float(
+        torch.tensor([threshold_bits], dtype=torch.int16).view(torch.bfloat16)[0]
+    )
+
+
+@torch.no_grad()
+def _apply_ties_preprocessing(deltas, task_names, density: float) -> dict[str, float]:
+    """Apply the global trim/elect/disjoint steps used by AdaMerging++."""
+
+    thresholds = {
+        task_name: _magnitude_threshold(deltas[task_name], density)
+        for task_name in task_names
+    }
+    for task_name in task_names:
+        threshold = thresholds[task_name]
+        for tensor in deltas[task_name].values():
+            tensor.mul_(tensor.abs() >= threshold)
+
+    majority_balance = 0
+    for name in deltas[task_names[0]]:
+        summed = torch.zeros_like(deltas[task_names[0]][name], dtype=torch.float32)
+        for task_name in task_names:
+            summed.add_(deltas[task_name][name].float())
+        majority_balance += int(summed.sign().sum())
+    majority_sign = 1 if majority_balance > 0 else -1 if majority_balance < 0 else 0
+
+    for name in deltas[task_names[0]]:
+        summed = torch.zeros_like(deltas[task_names[0]][name], dtype=torch.float32)
+        for task_name in task_names:
+            summed.add_(deltas[task_name][name].float())
+        elected = summed.sign()
+        if majority_sign:
+            elected[elected == 0] = majority_sign
+        for task_name in task_names:
+            delta = deltas[task_name][name]
+            keep = torch.where(elected > 0, delta > 0, delta < 0)
+            delta.mul_(keep)
+    return thresholds
 
 
 def _prompt_fingerprint(task_name: str, record: dict) -> str:
@@ -171,6 +248,7 @@ def optimize_coefficients(
     cache_dir: str | None,
     trust_remote_code: bool,
     device_map: str,
+    direct_output: Path | None = None,
 ) -> AdaMergingCoefficients:
     optimization = config.optimization
     torch.manual_seed(optimization.seed)
@@ -224,9 +302,20 @@ def optimize_coefficients(
         torch.cuda.empty_cache()
 
     task_names = [task.name for task in config.models]
+    ties_thresholds = None
+    if optimization.variant == "adamerging_plus_plus":
+        ties_thresholds = _apply_ties_preprocessing(
+            deltas, task_names, optimization.ties_density
+        )
+    parameter_names = [name for name, _ in model.named_parameters()]
+    coefficient_shape = (
+        (len(parameter_names), len(task_names))
+        if optimization.mode == "layer_wise"
+        else (len(task_names),)
+    )
     raw_coefficients = torch.nn.Parameter(
         torch.full(
-            (len(task_names),),
+            coefficient_shape,
             optimization.initial_coefficient,
             dtype=torch.float32,
             device=next(model.parameters()).device,
@@ -235,11 +324,33 @@ def optimize_coefficients(
     optimizer = torch.optim.Adam(
         [raw_coefficients], lr=optimization.learning_rate, weight_decay=0.0
     )
-    coefficient_dict = lambda: {
-        name: float(raw_coefficients[index].detach())
-        for index, name in enumerate(task_names)
-    }
-    _write_weights(model, base, deltas, coefficient_dict())
+
+    def coefficient_dict():
+        values = raw_coefficients.detach().cpu()
+        if optimization.mode == "task_wise":
+            return {name: float(values[index]) for index, name in enumerate(task_names)}
+        return {
+            task_name: {
+                parameter_name: float(values[parameter_index, task_index])
+                for parameter_index, parameter_name in enumerate(parameter_names)
+            }
+            for task_index, task_name in enumerate(task_names)
+        }
+
+    def coefficient_summary():
+        values = raw_coefficients.detach().float().cpu()
+        if values.ndim == 1:
+            return coefficient_dict()
+        return {
+            task_name: {
+                "min": float(values[:, task_index].min()),
+                "mean": float(values[:, task_index].mean()),
+                "max": float(values[:, task_index].max()),
+            }
+            for task_index, task_name in enumerate(task_names)
+        }
+
+    _write_weights(model, base, deltas, raw_coefficients, task_names)
     fixed = _fixed_responses(
         model,
         tokenizer,
@@ -264,28 +375,44 @@ def optimize_coefficients(
                 loss = _entropy_loss(model, prompt_ids, response_ids)
                 (loss / len(task_names)).backward()
                 task_losses[task_name] = float(loss.detach())
-            scalar_gradient = _coefficient_gradients(model, deltas, task_names)
+            scalar_gradient = _coefficient_gradients(
+                model,
+                deltas,
+                task_names,
+                layer_wise=optimization.mode == "layer_wise",
+            )
             optimizer.zero_grad(set_to_none=True)
             raw_coefficients.grad = scalar_gradient.to(raw_coefficients.device)
             optimizer.step()
             with torch.no_grad():
                 raw_coefficients.clamp_(0.0, 1.0)
-            _write_weights(model, base, deltas, coefficient_dict())
+            _write_weights(model, base, deltas, raw_coefficients, task_names)
             final_objective = sum(task_losses.values()) / len(task_names)
             row = {
                 "iteration": step + 1,
                 "objective": final_objective,
                 "task_entropy": task_losses,
-                "coefficients": coefficient_dict(),
+                "coefficients": coefficient_summary(),
             }
             log.write(json.dumps(row) + "\n")
             log.flush()
 
     coefficients = AdaMergingCoefficients(
+        variant=optimization.variant,
+        mode=optimization.mode,
         weights=coefficient_dict(),
         iterations=optimization.iterations,
         final_objective=final_objective,
+        ties_thresholds=ties_thresholds,
     )
+    if direct_output is not None:
+        direct_output.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(
+            direct_output,
+            safe_serialization=True,
+            max_shard_size="5GB",
+        )
+        tokenizer.save_pretrained(direct_output)
     del model, base, deltas, optimizer, raw_coefficients
     gc.collect()
     torch.cuda.empty_cache()
@@ -310,26 +437,39 @@ def main(
     source = Path(config_file).read_text(encoding="utf-8")
     config = AdaMergingConfiguration.model_validate(yaml.safe_load(source))
     artifact_dir = Path(str(out_path) + ".adamerging")
+    direct_output = (
+        Path(out_path)
+        if config.optimization.variant == "adamerging_plus_plus" and not optimize_only
+        else None
+    )
     coefficients = optimize_coefficients(
-        config, artifact_dir, cache_dir, trust_remote_code, device_map
+        config,
+        artifact_dir,
+        cache_dir,
+        trust_remote_code,
+        device_map,
+        direct_output=direct_output,
     )
     artifact_dir.mkdir(parents=True, exist_ok=True)
     coefficient_path = artifact_dir / "coefficients.json"
     coefficient_path.write_text(
         coefficients.model_dump_json(indent=2) + "\n", encoding="utf-8"
     )
-    merge_config = build_task_arithmetic_config(config, coefficients)
-    merge_yaml = merge_config.to_yaml()
-    (artifact_dir / "merge.yml").write_text(merge_yaml + "\n", encoding="utf-8")
     click.echo(coefficients.model_dump_json(indent=2))
     if optimize_only:
         return
-    run_merge(
-        merge_config,
-        out_path,
-        options=MergeOptions(cuda=True, trust_remote_code=trust_remote_code),
-        config_source=merge_yaml,
-    )
+    if config.optimization.variant == "adamerging":
+        merge_config = build_task_arithmetic_config(config, coefficients)
+        merge_yaml = merge_config.to_yaml()
+        (artifact_dir / "merge.yml").write_text(merge_yaml + "\n", encoding="utf-8")
+        run_merge(
+            merge_config,
+            out_path,
+            options=MergeOptions(cuda=True, trust_remote_code=trust_remote_code),
+            config_source=merge_yaml,
+        )
+    else:
+        (Path(out_path) / "adamerging_config.yml").write_text(source, encoding="utf-8")
     (Path(out_path) / "adamerging_coefficients.json").write_text(
         coefficients.model_dump_json(indent=2) + "\n", encoding="utf-8"
     )

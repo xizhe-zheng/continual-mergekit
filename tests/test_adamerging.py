@@ -11,7 +11,11 @@ from mergekit.adamerging import (
     load_first_turn_prompts,
     response_token_entropy,
 )
-from mergekit.scripts.adamerging import _coefficient_gradients, _write_weights
+from mergekit.scripts.adamerging import (
+    _apply_ties_preprocessing,
+    _coefficient_gradients,
+    _write_weights,
+)
 
 CONFIG = """
 base_model: base
@@ -87,6 +91,26 @@ def test_data_names_must_match_experts():
         AdaMergingConfiguration.model_validate(raw)
 
 
+@pytest.mark.parametrize(
+    ("variant", "mode"),
+    [
+        ("adamerging", "task_wise"),
+        ("adamerging", "layer_wise"),
+        ("adamerging_plus_plus", "task_wise"),
+        ("adamerging_plus_plus", "layer_wise"),
+    ],
+)
+def test_official_variant_and_coefficient_granularity_combinations(variant, mode):
+    raw = yaml.safe_load(CONFIG)
+    raw["optimization"]["variant"] = variant
+    raw["optimization"]["mode"] = mode
+
+    config = AdaMergingConfiguration.model_validate(raw)
+
+    assert config.optimization.variant == variant
+    assert config.optimization.mode == mode
+
+
 def test_loads_one_shuffled_first_turn_per_episode(tmp_path):
     path = tmp_path / "states.jsonl"
     path.write_text(
@@ -125,8 +149,8 @@ def test_manual_task_vector_gradient_matches_chain_rule():
         "a": {"weight": torch.tensor([[0.5, -1.0]])},
         "b": {"weight": torch.tensor([[2.0, 3.0]])},
     }
-    weights = {"a": 0.2, "b": 0.4}
-    _write_weights(model, base, deltas, weights)
+    weights = torch.tensor([0.2, 0.4])
+    _write_weights(model, base, deltas, weights, ["a", "b"])
     model(torch.tensor([[3.0, -2.0]])).square().sum().backward()
 
     actual = _coefficient_gradients(model, deltas, ["a", "b"])
@@ -136,3 +160,59 @@ def test_manual_task_vector_gradient_matches_chain_rule():
     merged = merged + coefficients[1] * deltas["b"]["weight"]
     (torch.tensor([[3.0, -2.0]]) @ merged.T).square().sum().backward()
     assert actual.tolist() == pytest.approx(coefficients.grad.tolist())
+
+
+def test_layer_wise_coefficients_export_as_tensor_filters():
+    config = AdaMergingConfiguration.model_validate(yaml.safe_load(CONFIG))
+    coefficients = AdaMergingCoefficients(
+        mode="layer_wise",
+        weights={
+            "tool": {"model.layer.weight": 0.2},
+            "search": {"model.layer.weight": 0.7},
+        },
+        iterations=1,
+    )
+
+    merge_config = build_task_arithmetic_config(config, coefficients)
+
+    tool_weights = merge_config.models[0].parameters["weight"]
+    assert tool_weights[0].filter == "model.layer.weight"
+    assert tool_weights[0].value == pytest.approx(0.2)
+    assert tool_weights[-1].filter == "*"
+    assert tool_weights[-1].value == 0.0
+
+
+def test_layer_wise_manual_gradient_keeps_one_value_per_tensor_and_task():
+    model = torch.nn.Linear(2, 1, bias=False)
+    base = {"weight": torch.tensor([[1.0, 2.0]])}
+    deltas = {
+        "a": {"weight": torch.tensor([[0.5, -1.0]])},
+        "b": {"weight": torch.tensor([[2.0, 3.0]])},
+    }
+    coefficients = torch.tensor([[0.2, 0.4]])
+    _write_weights(model, base, deltas, coefficients, ["a", "b"])
+    model(torch.tensor([[3.0, -2.0]])).square().sum().backward()
+
+    actual = _coefficient_gradients(model, deltas, ["a", "b"], layer_wise=True)
+
+    assert actual.shape == (1, 2)
+    scalar_coefficients = torch.tensor([0.2, 0.4], requires_grad=True)
+    merged = base["weight"] + scalar_coefficients[0] * deltas["a"]["weight"]
+    merged = merged + scalar_coefficients[1] * deltas["b"]["weight"]
+    (torch.tensor([[3.0, -2.0]]) @ merged.T).square().sum().backward()
+    assert actual[0].tolist() == pytest.approx(scalar_coefficients.grad.tolist())
+
+
+def test_adamerging_plus_plus_ties_preprocessing():
+    deltas = {
+        "a": {"weight": torch.tensor([10.0, 1.0, -8.0, 0.5]).bfloat16()},
+        "b": {"weight": torch.tensor([-9.0, 7.0, -2.0, 0.1]).bfloat16()},
+    }
+
+    thresholds = _apply_ties_preprocessing(deltas, ["a", "b"], density=0.5)
+
+    # This matches the reference implementation's kth-value boundary,
+    # including values equal to the threshold.
+    assert thresholds == {"a": 1.0, "b": 2.0}
+    assert deltas["a"]["weight"].float().tolist() == [10.0, 1.0, -8.0, 0.0]
+    assert deltas["b"]["weight"].float().tolist() == [0.0, 7.0, -2.0, 0.0]

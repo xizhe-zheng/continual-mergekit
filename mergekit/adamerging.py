@@ -12,13 +12,17 @@ coupling the merge planner to datasets or model training.
 import json
 import random
 from pathlib import Path
-from typing import Annotated, Dict, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional, Union
 
 import torch
 from pydantic import BaseModel, Field, model_validator
 
 from mergekit.common import ModelReference
-from mergekit.config import InputModelDefinition, MergeConfiguration
+from mergekit.config import (
+    ConditionalParameter,
+    InputModelDefinition,
+    MergeConfiguration,
+)
 from mergekit.tokenizer.config import TokenizerConfig
 
 Coefficient = Annotated[float, Field(ge=0.0, le=1.0)]
@@ -34,7 +38,9 @@ class AdaMergingInputModel(BaseModel, frozen=True):
 class AdaMergingOptimizationConfig(BaseModel, frozen=True):
     """Hyperparameters used while learning task-wise coefficients."""
 
-    mode: Literal["task_wise"] = "task_wise"
+    variant: Literal["adamerging", "adamerging_plus_plus"] = "adamerging"
+    mode: Literal["task_wise", "layer_wise"] = "task_wise"
+    ties_density: float = Field(default=0.2, gt=0.0, le=1.0)
     initial_coefficient: Coefficient = 0.3
     learning_rate: float = Field(default=1e-3, gt=0.0)
     iterations: int = Field(default=500, gt=0)
@@ -100,10 +106,12 @@ class AdaMergingConfiguration(BaseModel, frozen=True):
 class AdaMergingCoefficients(BaseModel, frozen=True):
     """Portable artifact produced by coefficient optimization."""
 
-    mode: Literal["task_wise"] = "task_wise"
-    weights: Dict[str, Coefficient]
+    variant: Literal["adamerging", "adamerging_plus_plus"] = "adamerging"
+    mode: Literal["task_wise", "layer_wise"] = "task_wise"
+    weights: Dict[str, Union[Coefficient, Dict[str, Coefficient]]]
     iterations: int = Field(ge=0)
     final_objective: Optional[float] = None
+    ties_thresholds: Optional[Dict[str, float]] = None
 
 
 def build_task_arithmetic_config(
@@ -111,6 +119,9 @@ def build_task_arithmetic_config(
     coefficients: AdaMergingCoefficients,
 ) -> MergeConfiguration:
     """Build the static merge that materializes learned AdaMerging weights."""
+
+    if coefficients.variant != "adamerging":
+        raise ValueError("AdaMerging++ is saved directly by mergekit-adamerging")
 
     expected = {entry.name for entry in config.models}
     supplied = set(coefficients.weights)
@@ -127,16 +138,24 @@ def build_task_arithmetic_config(
         )
 
     tokenizer = config.tokenizer or TokenizerConfig(source=config.base_model)
+    input_models = []
+    for entry in config.models:
+        learned = coefficients.weights[entry.name]
+        if isinstance(learned, dict):
+            weight = [
+                ConditionalParameter(filter=name, value=value)
+                for name, value in learned.items()
+            ]
+            weight.append(ConditionalParameter(filter="*", value=0.0))
+        else:
+            weight = float(learned)
+        input_models.append(
+            InputModelDefinition(model=entry.model, parameters={"weight": weight})
+        )
     return MergeConfiguration(
         merge_method="task_arithmetic",
         base_model=config.base_model,
-        models=[
-            InputModelDefinition(
-                model=entry.model,
-                parameters={"weight": coefficients.weights[entry.name]},
-            )
-            for entry in config.models
-        ],
+        models=input_models,
         parameters={"normalize": False, "lambda": 1.0},
         dtype=config.dtype,
         out_dtype=config.out_dtype,
