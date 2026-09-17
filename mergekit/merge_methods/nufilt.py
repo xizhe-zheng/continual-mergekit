@@ -98,7 +98,9 @@ class NUFILTMerge(GroupMergeMethod):
         if not patterns:
             raise ValueError("NUFILT target_modules must contain module substrings")
         if name is None:
-            raise ValueError("NUFILT requires a tensor name for target module selection")
+            raise ValueError(
+                "NUFILT requires a tensor name for target module selection"
+            )
         if (
             base.ndim != 2
             or not name.endswith(".weight")
@@ -118,15 +120,13 @@ class NUFILTMerge(GroupMergeMethod):
             task = entry.tensor.detach().to(work_dtype) - base_w
             previous = merged - base_w
             pre_v = _right_vectors(previous)[:, : p["null_r"]]
-            task_v = (
-                _right_vectors(task)[:, : p["grad_r"]] if p["grad_r"] > 0 else None
-            )
+            task_v = _right_vectors(task)[:, : p["grad_r"]] if p["grad_r"] > 0 else None
             u = pre_v if p["null_space"] else None
             # Stable per-weight initialization avoids dependence on graph order
             # and never changes the caller's global RNG state. This intentionally
             # differs from FusionBench's whole-model RNG consumption sequence.
             digest = hashlib.sha256(
-                f'{p["seed"]}:{name}:{task_index}'.encode()
+                f"{p['seed']}:{name}:{task_index}".encode()
             ).digest()
             generator = torch.Generator(device="cpu").manual_seed(
                 int.from_bytes(digest[:8], "little")
@@ -140,8 +140,15 @@ class NUFILTMerge(GroupMergeMethod):
             # filters the first task with its SVD basis, without training LoRA.
             if task_index > 0 and p["lora_r"] > 0 and p["max_steps"] > 0:
                 a, b = _adapt(
-                    task, previous, a, b, pre_v=pre_v, task_v=task_v, u=u,
-                    lr=p["lr"], steps=p["max_steps"],
+                    task,
+                    previous,
+                    a,
+                    b,
+                    pre_v=pre_v,
+                    task_v=task_v,
+                    u=u,
+                    lr=p["lr"],
+                    steps=p["max_steps"],
                 )
             # Preserve reference arithmetic order: tiny changes can rotate
             # degenerate historical SVD subspaces at the next task.
