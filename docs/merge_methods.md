@@ -12,6 +12,7 @@
   - [Karcher Mean (`karcher`)](#karcher-mean-karcher)
 - [Task Vector Methods](#task-vector-methods)
   - [Task Arithmetic (`task_arithmetic`)](#task-arithmetic-task_arithmetic)
+  - [WUDI-Merging (`wudi`)](#wudi-merging-wudi)
   - [TSV-Merge and Iso-C (`tsv`, `iso_c`)](#tsv-merge-and-iso-c-tsv-iso_c)
   - [TIES-Merging (`ties`)](#ties-merging-ties)
   - [DARE (`dare_linear`, `dare_ties`)](#dare-dare_linear-dare_ties)
@@ -153,6 +154,41 @@ This guide provides detailed information about the various model merging algorit
 - `lambda` (global): Scaling factor applied to the summed task vectors before adding back to the base. Default `1.0`
 
 **Reference:** [Editing Models with Task Arithmetic](https://arxiv.org/abs/2212.04089)
+
+### WUDI-Merging (`wudi`)
+
+**Concept:** Initializes a merged task vector as the sum of the input task
+vectors, then independently optimizes each linear-layer update to minimize its
+normalized interference with every expert task vector. The implementation uses
+the exact gradient and Adam update from the reference objective without retaining
+an autograd graph.
+
+**Inputs:** Requires a `base_model` and one or more fine-tuned models descended
+from that base.
+
+**Key Parameters:**
+
+- `learning_rate`: Adam learning rate. Default `1e-5`.
+- `iterations`: optimization steps per linear layer. Default `300`.
+- `beta1`, `beta2`, and `epsilon`: Adam parameters. Defaults are `0.9`, `0.999`,
+  and `1e-8`.
+- `exclude_regex`: case-insensitive pattern for matrix tensors that should be
+  copied from the base. By default this excludes embeddings, output heads, and
+  classifiers, matching the paper's linear-layer-only setup.
+
+Non-matrix tensors and excluded matrix tensors are copied from the base model.
+FP16/BF16 inputs are optimized in FP32. WUDI is substantially more expensive
+than arithmetic merge methods because every eligible matrix receives a separate
+iterative solve.
+
+Example: [wudi.yml](../examples/wudi.yml).
+
+```sh
+mergekit-yaml examples/wudi.yml ./merged-wudi --cuda
+```
+
+**Reference:** [Whoever Started the Interference Should End It: Guiding Data-Free
+Model Merging via Task Vectors](https://arxiv.org/abs/2503.08099)
 
 ### TSV-Merge and Iso-C (`tsv`, `iso_c`)
 

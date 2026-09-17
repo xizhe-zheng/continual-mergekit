@@ -20,6 +20,7 @@ from mergekit.merge_methods.ram import ram_merge, ramplus_merge, ramplus_tl_merg
 from mergekit.merge_methods.sce import sce_merge
 from mergekit.merge_methods.slerp import slerp_merge_method
 from mergekit.merge_methods.spectral import iso_c_merge, tsv_merge
+from mergekit.merge_methods.wudi import wudi_merge
 from mergekit.sparsify import SparsificationMethod
 
 _METHODS: Dict[str, MergeMethod] = {}
@@ -52,6 +53,7 @@ for method in (
     ram_merge,
     ramplus_merge,
     ramplus_tl_merge,
+    wudi_merge,
     sce_merge,
     linear_merge,
     slerp_merge_method,

@@ -33,6 +33,7 @@ from mergekit.merge_methods.ram import ramplus_merge as ramplus_merge
 from mergekit.merge_methods.ram import ramplus_tl_merge as ramplus_tl_merge
 from mergekit.merge_methods.registry import get, register, registered_methods
 from mergekit.merge_methods.sce import sce_merge as sce_merge
+from mergekit.merge_methods.wudi import wudi_merge as wudi_merge
 
 __all__ = [
     "BatchedMergeMethod",
@@ -61,6 +62,7 @@ __all__ = [
     "ram_merge",
     "ramplus_merge",
     "ramplus_tl_merge",
+    "wudi_merge",
     "get",
     "register",
     "registered_methods",

@@ -1,0 +1,17 @@
+merge_method: wudi
+base_model: base
+
+models:
+  - model: toolrl
+  - model: research
+  - model: gigpo-webshop
+  - model: gigpo-alfworld
+
+parameters:
+  learning_rate: 0.00001
+  iterations: 300
+
+dtype: float32
+out_dtype: bfloat16
+tokenizer:
+  source: base
